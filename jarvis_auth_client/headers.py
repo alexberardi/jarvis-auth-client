@@ -18,7 +18,7 @@ HEADER_CONTEXT_HOUSEHOLD_MEMBER_IDS = "X-Context-Household-Member-Ids"
 def get_app_headers() -> dict[str, str]:
     """Get app-to-app authentication headers from environment.
 
-    Reads JARVIS_AUTH_APP_ID and JARVIS_AUTH_APP_KEY from environment
+    Reads JARVIS_APP_ID and JARVIS_APP_KEY from environment
     and returns them as headers for authenticating with other services.
 
     Returns:
@@ -27,12 +27,12 @@ def get_app_headers() -> dict[str, str]:
     Raises:
         ValueError: If environment variables are not set.
     """
-    app_id = os.getenv("JARVIS_AUTH_APP_ID")
-    app_key = os.getenv("JARVIS_AUTH_APP_KEY")
+    app_id = os.getenv("JARVIS_APP_ID")
+    app_key = os.getenv("JARVIS_APP_KEY")
 
     if not app_id or not app_key:
         raise ValueError(
-            "JARVIS_AUTH_APP_ID and JARVIS_AUTH_APP_KEY must be set in environment"
+            "JARVIS_APP_ID and JARVIS_APP_KEY must be set in environment"
         )
 
     return {
