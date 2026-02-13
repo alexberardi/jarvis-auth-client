@@ -60,14 +60,31 @@ async def shutdown() -> None:
 
 
 def _get_auth_url() -> str:
-    """Get the auth service URL."""
+    """Get the auth service URL.
+
+    Resolution order:
+    1. Explicit URL from init(auth_base_url=...)
+    2. JARVIS_AUTH_BASE_URL env var
+    3. jarvis-config-client (if installed and initialized)
+    """
     url = _auth_base_url or os.getenv("JARVIS_AUTH_BASE_URL")
-    if not url:
-        raise ValueError(
-            "jarvis-auth-client not initialized: "
-            "call init(auth_base_url=...) or set JARVIS_AUTH_BASE_URL"
-        )
-    return url
+    if url:
+        return url
+
+    # Try config-client as last resort
+    try:
+        from jarvis_config_client import get_service_url
+        url = get_service_url("auth")
+        if url:
+            return url
+    except (ImportError, RuntimeError):
+        pass
+
+    raise ValueError(
+        "jarvis-auth-client not initialized: "
+        "call init(auth_base_url=...), set JARVIS_AUTH_BASE_URL, "
+        "or initialize jarvis-config-client"
+    )
 
 
 async def _get_client() -> httpx.AsyncClient:
