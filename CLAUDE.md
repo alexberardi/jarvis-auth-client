@@ -91,6 +91,8 @@ response = await client.post("http://whisper/transcribe", headers=headers)
 | Symbol | Type | Description |
 |--------|------|-------------|
 | `require_app_auth()` | Factory | Creates FastAPI dependency for app auth |
+| `validate_app_credentials(app_id, app_key)` | Async Function | Validate credentials (cached) |
+| `clear_validation_cache()` | Function | Clear the app-credential cache |
 | `AppAuthResult` | Model | Combined app validation + request context |
 | `AppValidationResult` | Model | Result of validating app credentials |
 | `RequestContext` | Model | Context from X-Context-* headers |
@@ -134,6 +136,7 @@ response = await client.post("http://whisper/transcribe", headers=headers)
 - `jarvis-command-center` — app-to-app headers for calling whisper/tts
 - `jarvis-whisper-api` — app auth for incoming requests
 - `jarvis-tts` — app auth for incoming requests
+- `jarvis-logs` — app-to-app auth with TTL caching
 
 ## Known Limitations
 
@@ -141,8 +144,9 @@ response = await client.post("http://whisper/transcribe", headers=headers)
 but does not verify user still exists/is active in database. Tokens are valid until expiry
 (default 30 minutes).
 
-**App auth - No caching yet**: Each request validates against jarvis-auth. Future versions
-may add caching with TTL.
+**App auth - TTL caching**: Valid results are cached for 60 seconds (configurable via
+`cache_ttl` in `init()`). Invalid/error results are never cached. Cache keys are SHA-256
+hashed so raw credentials are not retained in memory. Max 256 entries.
 
 ## Dependencies
 

@@ -8,9 +8,11 @@ This library provides:
 
 from jarvis_auth_client.client import init as _init_superuser
 from jarvis_auth_client.client import require_superuser
+from jarvis_auth_client.fastapi import clear_validation_cache
 from jarvis_auth_client.fastapi import init as _init_app_auth
 from jarvis_auth_client.fastapi import require_app_auth
 from jarvis_auth_client.fastapi import shutdown as _shutdown_app_auth
+from jarvis_auth_client.fastapi import validate_app_credentials
 from jarvis_auth_client.models import (
     AppAuthResult,
     AppValidationResult,
@@ -62,6 +64,8 @@ __all__ = [
     "SuperuserUser",
     # App-to-app auth
     "require_app_auth",
+    "validate_app_credentials",
+    "clear_validation_cache",
     "AppAuthResult",
     "AppValidationResult",
     "RequestContext",

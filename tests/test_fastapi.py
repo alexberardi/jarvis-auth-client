@@ -1,5 +1,7 @@
 """Tests for app-to-app authentication (fastapi module)."""
 
+import time
+
 import pytest
 import httpx
 import respx
@@ -7,6 +9,7 @@ import respx
 import jarvis_auth_client.fastapi as mod
 from jarvis_auth_client.fastapi import (
     _get_auth_url,
+    clear_validation_cache,
     require_app_auth,
     shutdown,
     validate_app_credentials,
@@ -24,6 +27,7 @@ def _reset_module_state(monkeypatch):
     mod._auth_base_url = None
     mod._http_client = None
     mod._cache_ttl = 60
+    clear_validation_cache()
     monkeypatch.delenv("JARVIS_AUTH_BASE_URL", raising=False)
     yield
     # Cleanup any open client after test
@@ -129,6 +133,107 @@ class TestValidateAppCredentials:
 
         assert result.valid is False
         assert "unavailable" in result.error.lower()
+
+
+class TestValidationCache:
+    @pytest.mark.asyncio
+    @respx.mock
+    async def test_cache_hit_avoids_http_call(self):
+        """Second call with same credentials uses cache."""
+        mod._auth_base_url = AUTH_BASE_URL
+        route = respx.get(f"{AUTH_BASE_URL}/internal/app-ping").mock(
+            return_value=httpx.Response(
+                200,
+                json={"app_id": "my-app", "name": "My App"},
+            )
+        )
+
+        result1 = await validate_app_credentials("my-app", "my-key")
+        result2 = await validate_app_credentials("my-app", "my-key")
+
+        assert result1.valid is True
+        assert result2.valid is True
+        assert route.call_count == 1
+
+    @pytest.mark.asyncio
+    @respx.mock
+    async def test_cache_miss_after_ttl_expires(self, monkeypatch):
+        """After TTL expires, a new HTTP call is made."""
+        mod._auth_base_url = AUTH_BASE_URL
+        route = respx.get(f"{AUTH_BASE_URL}/internal/app-ping").mock(
+            return_value=httpx.Response(
+                200,
+                json={"app_id": "ttl-app", "name": "TTL App"},
+            )
+        )
+
+        now = time.time()
+        monkeypatch.setattr(time, "time", lambda: now)
+
+        await validate_app_credentials("ttl-app", "ttl-key")
+
+        # Advance time past TTL (default 60s)
+        monkeypatch.setattr(time, "time", lambda: now + 61)
+
+        await validate_app_credentials("ttl-app", "ttl-key")
+
+        assert route.call_count == 2
+
+    @pytest.mark.asyncio
+    @respx.mock
+    async def test_invalid_results_not_cached(self):
+        """Invalid credentials are NOT cached, allowing immediate retry."""
+        mod._auth_base_url = AUTH_BASE_URL
+        route = respx.get(f"{AUTH_BASE_URL}/internal/app-ping").mock(
+            return_value=httpx.Response(401)
+        )
+
+        result1 = await validate_app_credentials("bad-app", "bad-key")
+        result2 = await validate_app_credentials("bad-app", "bad-key")
+
+        assert result1.valid is False
+        assert result2.valid is False
+        assert route.call_count == 2
+
+    @pytest.mark.asyncio
+    @respx.mock
+    async def test_clear_cache_forces_revalidation(self):
+        """clear_validation_cache() forces next call to hit the network."""
+        mod._auth_base_url = AUTH_BASE_URL
+        route = respx.get(f"{AUTH_BASE_URL}/internal/app-ping").mock(
+            return_value=httpx.Response(
+                200,
+                json={"app_id": "clear-app", "name": "Clear App"},
+            )
+        )
+
+        await validate_app_credentials("clear-app", "clear-key")
+        assert route.call_count == 1
+
+        clear_validation_cache()
+
+        await validate_app_credentials("clear-app", "clear-key")
+        assert route.call_count == 2
+
+    @pytest.mark.asyncio
+    @respx.mock
+    async def test_different_credentials_cached_separately(self):
+        """Different credential pairs have separate cache entries."""
+        mod._auth_base_url = AUTH_BASE_URL
+        route = respx.get(f"{AUTH_BASE_URL}/internal/app-ping").mock(
+            return_value=httpx.Response(
+                200,
+                json={"app_id": "app-a", "name": "App A"},
+            )
+        )
+
+        await validate_app_credentials("app-a", "key-a")
+        await validate_app_credentials("app-b", "key-b")
+        assert route.call_count == 2
+
+        # Repeating first one should be cached
+        await validate_app_credentials("app-a", "key-a")
+        assert route.call_count == 2
 
 
 class TestRequireAppAuth:
@@ -248,3 +353,23 @@ class TestShutdown:
         mod._http_client = None
         await shutdown()  # Should not raise
         assert mod._http_client is None
+
+    @pytest.mark.asyncio
+    @respx.mock
+    async def test_shutdown_clears_cache(self):
+        mod._auth_base_url = AUTH_BASE_URL
+        route = respx.get(f"{AUTH_BASE_URL}/internal/app-ping").mock(
+            return_value=httpx.Response(
+                200,
+                json={"app_id": "shut-app", "name": "Shut App"},
+            )
+        )
+
+        await validate_app_credentials("shut-app", "shut-key")
+        assert route.call_count == 1
+
+        await shutdown()
+
+        mod._auth_base_url = AUTH_BASE_URL
+        await validate_app_credentials("shut-app", "shut-key")
+        assert route.call_count == 2

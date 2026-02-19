@@ -4,8 +4,10 @@ Provides the require_app_auth dependency for validating incoming
 app-to-app authentication against the jarvis-auth service.
 """
 
+import asyncio
+import hashlib
 import os
-from functools import lru_cache
+import time
 from typing import Callable
 
 import httpx
@@ -23,14 +25,43 @@ from jarvis_auth_client.models import AppAuthResult, AppValidationResult, Reques
 # Module-level state
 _auth_base_url: str | None = None
 _http_client: httpx.AsyncClient | None = None
+_client_lock: asyncio.Lock | None = None
 _cache_ttl: int = 60
 
+# TTL cache: sha256(app_id:app_key) -> (AppValidationResult, timestamp)
+# Keys are hashed so raw credentials are never retained in memory.
+_validation_cache: dict[str, tuple[AppValidationResult, float]] = {}
+_MAX_CACHE_SIZE: int = 256
 
-@lru_cache(maxsize=128)
-def _cached_validation(app_id: str, app_key: str) -> AppValidationResult:
-    """Cached synchronous validation (for simple cases)."""
-    # Note: This is a placeholder - actual caching happens at a higher level
-    pass
+
+def _make_cache_key(app_id: str, app_key: str) -> str:
+    """Create a non-reversible cache key from credentials."""
+    return hashlib.sha256(f"{app_id}:{app_key}".encode()).hexdigest()
+
+
+def _get_cached_validation(app_id: str, app_key: str) -> AppValidationResult | None:
+    """Return cached validation result if within TTL, else None."""
+    key = _make_cache_key(app_id, app_key)
+    if key in _validation_cache:
+        result, timestamp = _validation_cache[key]
+        if time.time() - timestamp < _cache_ttl:
+            return result
+        del _validation_cache[key]
+    return None
+
+
+def _cache_validation_result(app_id: str, app_key: str, result: AppValidationResult) -> None:
+    """Store a validation result with the current timestamp."""
+    if len(_validation_cache) >= _MAX_CACHE_SIZE:
+        # Evict oldest entry
+        oldest_key = min(_validation_cache, key=lambda k: _validation_cache[k][1])
+        del _validation_cache[oldest_key]
+    _validation_cache[_make_cache_key(app_id, app_key)] = (result, time.time())
+
+
+def clear_validation_cache() -> None:
+    """Clear the app-credential validation cache."""
+    _validation_cache.clear()
 
 
 def init(
@@ -52,11 +83,14 @@ def init(
 
 async def shutdown() -> None:
     """Shutdown and cleanup resources."""
-    global _http_client
+    global _http_client, _client_lock
 
     if _http_client:
         await _http_client.aclose()
         _http_client = None
+
+    _client_lock = None
+    clear_validation_cache()
 
 
 def _get_auth_url() -> str:
@@ -88,11 +122,16 @@ def _get_auth_url() -> str:
 
 
 async def _get_client() -> httpx.AsyncClient:
-    """Get or create the HTTP client."""
-    global _http_client
+    """Get or create the HTTP client (thread-safe via asyncio.Lock)."""
+    global _http_client, _client_lock
+
+    if _client_lock is None:
+        _client_lock = asyncio.Lock()
 
     if _http_client is None:
-        _http_client = httpx.AsyncClient(timeout=10.0)
+        async with _client_lock:
+            if _http_client is None:
+                _http_client = httpx.AsyncClient(timeout=10.0)
 
     return _http_client
 
@@ -103,6 +142,9 @@ async def validate_app_credentials(
 ) -> AppValidationResult:
     """Validate app credentials against jarvis-auth service.
 
+    Results with valid=True are cached for up to `_cache_ttl` seconds.
+    Invalid / error results are never cached so retries work immediately.
+
     Args:
         app_id: The app ID to validate
         app_key: The app key to validate
@@ -110,6 +152,11 @@ async def validate_app_credentials(
     Returns:
         AppValidationResult with validation status
     """
+    # Check cache first
+    cached = _get_cached_validation(app_id, app_key)
+    if cached is not None:
+        return cached
+
     auth_url = _get_auth_url()
     client = await _get_client()
 
@@ -123,12 +170,20 @@ async def validate_app_credentials(
         )
 
         if response.status_code == 200:
-            data = response.json()
-            return AppValidationResult(
+            try:
+                data = response.json()
+            except (ValueError, TypeError):
+                return AppValidationResult(
+                    valid=False,
+                    error="Invalid JSON response from auth service",
+                )
+            result = AppValidationResult(
                 valid=True,
                 app_id=data.get("app_id"),
                 name=data.get("name"),
             )
+            _cache_validation_result(app_id, app_key, result)
+            return result
         elif response.status_code == 401:
             return AppValidationResult(
                 valid=False,
