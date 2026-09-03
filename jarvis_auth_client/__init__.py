@@ -35,14 +35,21 @@ def init(
 
     Args:
         secret_key: JWT secret key for superuser validation (for require_superuser)
-        algorithm: JWT algorithm (default: HS256)
-        auth_base_url: Base URL for jarvis-auth service (for require_app_auth)
+        algorithm: Legacy; verification accepts HS256 and RS256 from an allowlist
+            regardless. See client.init.
+        auth_base_url: Base URL for jarvis-auth. Used by require_app_auth, and by
+            require_superuser to fetch the RS256 public key.
         cache_ttl: Cache TTL in seconds for app validation results
     """
     global _superuser_initialized, _app_auth_initialized
 
     if secret_key:
-        _init_superuser(secret_key=secret_key, algorithm=algorithm)
+        # auth_base_url is forwarded so superuser validation can fetch the RS256
+        # public key too — without it RS256 tokens fail closed while HS256 keeps
+        # working, which is right for a service not yet rolled forward.
+        _init_superuser(
+            secret_key=secret_key, algorithm=algorithm, auth_base_url=auth_base_url
+        )
         _superuser_initialized = True
 
     if auth_base_url:
