@@ -26,7 +26,13 @@ pytest
 from jarvis_auth_client import init, require_superuser, SuperuserUser
 
 # One-time init at service startup
-init(secret_key=os.getenv("JARVIS_AUTH_SECRET_KEY"))
+init(
+    secret_key=os.getenv("JARVIS_AUTH_SECRET_KEY"),
+    # Required to verify RS256 tokens: the public key is fetched from
+    # {auth_base_url}/auth/public-key. Without it RS256 fails closed (401)
+    # while HS256 keeps working.
+    auth_base_url=os.getenv("JARVIS_AUTH_BASE_URL"),
+)
 
 # FastAPI dependency — returns SuperuserUser or raises 401/403
 @app.get("/admin/something")
