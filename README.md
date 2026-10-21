@@ -1,5 +1,10 @@
 # jarvis-auth-client
 
+> [!WARNING]
+> **Deprecated.** This library is used only by the services of the old multi-container Jarvis Automation stack, which jarvisd ([jarvis-server](https://github.com/alexberardi/jarvis-server)) replaces. New installs: [installer.jarvisautomation.io](https://installer.jarvisautomation.io). Moving an existing install: [Migrating from the Docker install](https://docs.jarvisautomation.dev/install/migrating-from-docker/).
+>
+> The old stack stays supported, with fixes only, until jarvisd v0.1.0. This repository will be archived after that; published images and packages stay available for existing installs.
+
 A small shared Python library for authentication in Jarvis microservices. It provides FastAPI dependencies and helpers so services can validate superuser JWTs, perform app-to-app authentication against `jarvis-auth`, and build the headers used for inter-service calls.
 
 ## What it provides
